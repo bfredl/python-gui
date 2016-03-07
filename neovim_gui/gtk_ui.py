@@ -92,10 +92,11 @@ class GtkUI(object):
         self._invalid = None
         self._pending = [0, 0, 0]
         self._reset_cache()
+        self.pum_pos = None
 
     def start(self, bridge):
         """Start the UI event loop."""
-        bridge.attach(80, 24, True)
+        bridge.attach(80, 24, rgb=True, popupmenu_external=True)
         drawing_area = Gtk.DrawingArea()
         drawing_area.connect('draw', self._gtk_draw)
         window = Gtk.Window()
@@ -291,6 +292,23 @@ class GtkUI(object):
     def _nvim_set_icon(self, icon):
         self._window.set_icon_name(icon)
 
+    def _nvim_popupmenu_show(self, items, sel, row, col):
+        self.pum_items = items
+        print("PUM START")
+        print([i[0] for i in items])
+        self._nvim_popupmenu_select(sel)
+        self.pum_pos = (row, col)
+
+    def _nvim_popupmenu_select(self, num):
+        if num == -1:
+            print("PUM UNSELECT")
+        else:
+            print(self.pum_items[num])
+
+    def _nvim_popupmenu_hide(self):
+        print("PUM STOP")
+        self.pum_pos = None
+
     def _gtk_draw(self, wid, cr):
         if not self._screen:
             return
@@ -311,11 +329,18 @@ class GtkUI(object):
             # which is used for scrolling
             row, col = self._screen.row, self._screen.col
             text, attrs = self._screen.get_cursor()
+            cr.save()
             self._pango_draw(row, col, [(text, attrs,)], cr=cr, cursor=True)
+            cr.restore()
             x, y = self._get_coords(row, col)
             currect = Rectangle(x, y, self._cell_pixel_width,
                                 self._cell_pixel_height)
             self._im_context.set_cursor_location(currect)
+        if self.pum_pos:
+            r,c = self.pum_pos
+            text, attrs = self._screen.get_cell(r,c)
+            attrs = self._get_pango_attrs({'background':255*256*256})
+            self._pango_draw(r, c, [(text, attrs,)], cr=cr, cursor=False)
 
     def _gtk_configure(self, widget, event):
         def resize(*args):

@@ -42,9 +42,9 @@ class UIBridge(object):
         """Send a resize request to nvim."""
         self._call(self._nvim.ui_try_resize, columns, rows)
 
-    def attach(self, columns, rows, rgb):
+    def attach(self, columns, rows, **opts):
         """Attach the UI to nvim."""
-        self._call(self._nvim.ui_attach, columns, rows, rgb)
+        self._call(self._nvim.request, "nvim_ui_attach", columns, rows, opts)
 
     def detach(self):
         """Detach the UI from nvim."""
@@ -91,7 +91,7 @@ class UIBridge(object):
                         try:
                             handler = getattr(self._ui, '_nvim_' + update[0])
                         except AttributeError:
-                            pass
+                            print(update)
                         else:
                             for args in update[1:]:
                                 handler(*args)

@@ -98,6 +98,10 @@ class Screen(object):
         """Get text, attrs at row, col."""
         return self._cells[row][col].get()
 
+    def get_cell_(self, row, col):
+        """Get text, attrs at row, col."""
+        return self._cells[row][col]
+
     def get_cursor(self):
         """Get text, attrs at the virtual cursor position."""
         return self.get_cell(self.row, self.col)
