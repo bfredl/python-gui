@@ -290,7 +290,7 @@ class GtkUI(object):
             # flush pending text if jumped to a different row
             self._flush()
         # work around some redraw glitches that can happen
-        #self._redraw_glitch_fix()
+        self._redraw_glitch_fix()
         # Update internal screen
         self._screen.put(self._get_pango_text(text), self._attrs)
         self.g._pending[1] = min(self._screen.col - 1, self.g._pending[1])
@@ -595,7 +595,7 @@ class GtkUI(object):
             lcol -= 1
             if text == ' ':
                 break
-        self._pending[1] = min(lcol + 1, self._pending[1])
+        self.g._pending[1] = min(lcol + 1, self.g._pending[1])
         # find the end of the sequence
         rcol = col + 1
         while rcol < self._screen.columns:
@@ -603,7 +603,7 @@ class GtkUI(object):
             rcol += 1
             if text == ' ':
                 break
-        self._pending[2] = max(rcol, self._pending[2])
+        self.g._pending[2] = max(rcol, self.g._pending[2])
 
 
 def _split_color(n):
