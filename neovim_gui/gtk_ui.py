@@ -81,6 +81,7 @@ class GtkUI(object):
         self._font_name = font[0]
         self._font_size = font[1]
         self._screen = None
+        self._screens = {}
         self._attrs = None
         self._busy = False
         self._mouse_enabled = False
@@ -91,11 +92,11 @@ class GtkUI(object):
         self._pressed = None
         self._invalid = None
         self._pending = [0, 0, 0]
+        self._drawing_areas = {}
+        self._windows = {}
         self._reset_cache()
 
-    def start(self, bridge):
-        """Start the UI event loop."""
-        bridge.attach(80, 24, rgb=True)
+    def create_drawing_area(self, handle):
         drawing_area = Gtk.DrawingArea()
         drawing_area.connect('draw', self._gtk_draw)
         window = Gtk.Window()
@@ -116,13 +117,24 @@ class GtkUI(object):
         window.connect('focus-in-event', self._gtk_focus_in)
         window.connect('focus-out-event', self._gtk_focus_out)
         window.show_all()
-        im_context = Gtk.IMMulticontext()
-        im_context.set_client_window(drawing_area.get_window())
-        im_context.set_use_preedit(False)  # TODO: preedit at cursor position
-        im_context.connect('commit', self._gtk_input)
         self._pango_context = drawing_area.create_pango_context()
         self._drawing_area = drawing_area
+        self._drawing_areas[handle] = drawing_area
         self._window = window
+        self._windows[handle] = window
+        self._screens[handle] = Screen(40,10)
+
+
+    def start(self, bridge):
+        """Start the UI event loop."""
+        bridge.attach(80, 24, rgb=True, ext_cmdline=True, ext_multigrid=True)#, ext_messages=True)
+        self.create_drawing_area(1)
+        self._curgrid = 1
+        im_context = Gtk.IMMulticontext()
+        im_context.set_client_window(self._drawing_area.get_window())
+        im_context.set_use_preedit(False)  # TODO: preedit at cursor position
+        im_context.connect('commit', self._gtk_input)
+        self.im_context = im_context
         self._im_context = im_context
         self._bridge = bridge
         Gtk.main()
@@ -142,6 +154,16 @@ class GtkUI(object):
 
     def _screen_invalid(self):
         self._drawing_area.queue_draw()
+
+    def _nvim_set_grid(self, handle):
+        print("I",handle)
+        self._curgrid = handle
+        if handle not in self._drawing_areas:
+            self.create_drawing_area(handle)
+        self._screen = self._screens[handle]
+        self._drawing_area = self._drawing_areas[handle]
+        self._window = self._windows[handle]
+        self.im_context.set_client_window(self._drawing_area.get_window())
 
     def _nvim_resize(self, columns, rows):
         da = self._drawing_area
@@ -168,6 +190,7 @@ class GtkUI(object):
         self._cell_pixel_width = cell_pixel_width
         self._cell_pixel_height = cell_pixel_height
         self._screen = Screen(columns, rows)
+        self._screens[self._curgrid] = self._screen
         self._window.resize(pixel_width, pixel_height)
 
     def _nvim_clear(self):
