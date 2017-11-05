@@ -45,9 +45,12 @@ class UIBridge(object):
         """Send input to nvim."""
         self._call(self._nvim.input, input_str)
 
-    def resize(self, columns, rows):
+    def resize(self, grid, columns, rows):
         """Send a resize request to nvim."""
-        self._call(self._nvim.ui_try_resize, columns, rows)
+        if 'ext_float' in self._nvim.metadata['ui_options']:
+            self._call(self._nvim.api.ui_grid_try_resize, grid, columns, rows)
+        else:
+            self._call(self._nvim.api.ui_try_resize, columns, rows)
 
     def attach(self, columns, rows, **options):
         """Attach the UI to nvim."""
@@ -99,8 +102,10 @@ class UIBridge(object):
                             handler = getattr(self._ui, '_nvim_' + update[0])
                             nparam = len(signature(handler).parameters)
 
+
                         except AttributeError:
                             if self.debug_events:
+                                print(self._ui._curgrid, end=' ', file=sys.stderr)
                                 print(repr(update), file=sys.stderr)
                         else:
                             if self.debug_events == 2 or (self.debug_events and len(update[1]) > nparam):
