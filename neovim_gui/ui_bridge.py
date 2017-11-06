@@ -91,15 +91,18 @@ class UIBridge(object):
                         # l = [','.join([str(a) for a in args])
                         #      for args in update[1:]]
                         # print >> sys.stderr, update[0], ' '.join(l)
+                        if self.debug_events:
+                            print(self._ui._curgrid, end=' ', file=sys.stderr)
                         try:
                             handler = getattr(self._ui, '_nvim_' + update[0])
                             nparam = len(signature(handler).parameters)
+
 
                         except AttributeError:
                             if self.debug_events:
                                 print(repr(update), file=sys.stderr)
                         else:
-                            if self.debug_events and len(update[1]) > nparam:
+                            if self.debug_events:# and len(update[1]) > nparam:
                                 print(repr(update), file=sys.stderr)
                             for args in update[1:]:
                                 handler(*args[:nparam])

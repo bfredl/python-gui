@@ -99,6 +99,7 @@ class GtkUI(object):
 
     def create_drawing_area(self, handle):
         self.g = Grid()
+        self.g.handle = handle
         drawing_area = Gtk.DrawingArea()
         drawing_area.connect('draw', partial(self._gtk_draw, self.g))
         window = Gtk.Window()
@@ -124,14 +125,13 @@ class GtkUI(object):
         self.g._window = window
         self.g._pending = [0, 0, 0]
         self.g._screen = Screen(40,10)
-        self._screen = self.g._screen
 
         self.grids[handle] = self.g
 
 
     def start(self, bridge):
         """Start the UI event loop."""
-        bridge.attach(80, 24, rgb=True, ext_cmdline=True, ext_multigrid=True)#, ext_messages=True)
+        bridge.attach(80, 24, rgb=True, ext_cmdline=False, ext_multigrid=True)#, ext_messages=True)
         im_context = Gtk.IMMulticontext()
         im_context.set_use_preedit(False)  # TODO: preedit at cursor position
         im_context.connect('commit', self._gtk_input)
@@ -150,7 +150,7 @@ class GtkUI(object):
             apply_updates()
             self._flush()
             self._start_blinking()
-            self._screen_invalid()
+            #self._screen_invalid()
             for g in self.grids.values():
                 g._drawing_area.queue_draw()
         GObject.idle_add(wrapper)
@@ -230,7 +230,7 @@ class GtkUI(object):
         self._screen.set_scroll_region(top, bot, left, right)
 
     def _nvim_scroll(self, count):
-        self._flush()
+        self._flush(self.g)
         top, bot = self._screen.top, self._screen.bot + 1
         left, right = self._screen.left, self._screen.right + 1
         # The diagrams below illustrate what will happen, depending on the
@@ -288,9 +288,9 @@ class GtkUI(object):
     def _nvim_put(self, text):
         if self._screen.row != self.g._pending[0]:
             # flush pending text if jumped to a different row
-            self._flush()
+            self._flush(self.g)
         # work around some redraw glitches that can happen
-        self._redraw_glitch_fix()
+        #self._redraw_glitch_fix()
         # Update internal screen
         self._screen.put(self._get_pango_text(text), self._attrs)
         self.g._pending[1] = min(self._screen.col - 1, self.g._pending[1])
@@ -337,8 +337,8 @@ class GtkUI(object):
             # Cursor is drawn separately in the window. This approach is
             # simpler because it doesn't taint the internal cairo surface,
             # which is used for scrolling
-            row, col = self._screen.row, self._screen.col
-            text, attrs = self._screen.get_cursor()
+            row, col = g._screen.row, g._screen.col
+            text, attrs = g._screen.get_cursor()
             self._pango_draw(g, row, col, [(text, attrs,)], cr=cr, cursor=True)
             x, y = self._get_coords(row, col)
             currect = Rectangle(x, y, self._cell_pixel_width,
@@ -455,7 +455,7 @@ class GtkUI(object):
         blink()
 
     def _clear_region(self, top, bot, left, right):
-        self._flush()
+        self._flush(self.g)
         self.g._cairo_context.save()
         self._mask_region(top, bot, left, right)
         r, g, b = _split_color(self._background)
@@ -481,14 +481,15 @@ class GtkUI(object):
         y = row * self._cell_pixel_height
         return x, y
 
-    def _flush(self):
-        for g in self.grids.values():
+    def _flush(self,g=None):
+        gs = [g] if g is not None else self.grids.values()
+        for g in gs:
             row, startcol, endcol = g._pending
             g._pending[0] = g._screen.row
             g._pending[1] = g._screen.col
             g._pending[2] = g._screen.col
             if startcol == endcol:
-                return
+                continue
             g._cairo_context.save()
             ccol = startcol
             buf = []
