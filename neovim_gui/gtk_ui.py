@@ -90,7 +90,6 @@ class GtkUI(object):
         self._insert_cursor = False
         self._blink = False
         self._blink_timer_id = None
-        self._resize_timer_id = None
         self._pressed = None
         self._invalid = None
         self._reset_cache()
@@ -100,6 +99,7 @@ class GtkUI(object):
     def create_drawing_area(self, handle):
         self.g = Grid()
         self.g.handle = handle
+        self.g._resize_timer_id = None
         drawing_area = Gtk.DrawingArea()
         drawing_area.connect('draw', partial(self._gtk_draw, self.g))
         window = Gtk.Window()
@@ -109,7 +109,7 @@ class GtkUI(object):
                           Gdk.EventMask.BUTTON_RELEASE_MASK |
                           Gdk.EventMask.POINTER_MOTION_MASK |
                           Gdk.EventMask.SCROLL_MASK)
-        window.connect('configure-event', self._gtk_configure)
+        window.connect('configure-event', partial(self._gtk_configure, self.g))
         window.connect('delete-event', self._gtk_quit)
         window.connect('key-press-event', self._gtk_key)
         window.connect('key-release-event', self._gtk_key_release)
@@ -191,7 +191,7 @@ class GtkUI(object):
         self.g._pango_layout = PangoCairo.create_layout(self.g._cairo_context)
         self.g._pango_layout.set_alignment(Pango.Alignment.LEFT)
         self.g._pango_layout.set_font_description(self._font)
-        self._pixel_width, self._pixel_height = pixel_width, pixel_height
+        self.g._pixel_width, self.g._pixel_height = pixel_width, pixel_height
         self._cell_pixel_width = cell_pixel_width
         self._cell_pixel_height = cell_pixel_height
         self.g._screen = Screen(columns, rows)
@@ -328,7 +328,7 @@ class GtkUI(object):
         # cr.fill()
         g._cairo_surface.flush()
         cr.save()
-        cr.rectangle(0, 0, self._pixel_width, self._pixel_height)
+        cr.rectangle(0, 0, g._pixel_width, g._pixel_height)
         cr.clip()
         cr.set_source_surface(g._cairo_surface, 0, 0)
         cr.paint()
@@ -345,24 +345,25 @@ class GtkUI(object):
                                 self._cell_pixel_height)
             self._im_context.set_cursor_location(currect)
 
-    def _gtk_configure(self, widget, event):
+    def _gtk_configure(self, g, widget, event):
         def resize(*args):
             self._resize_timer_id = None
-            width, height = self._window.get_size()
+            width, height = g._window.get_size()
             columns = width // self._cell_pixel_width
             rows = height // self._cell_pixel_height
-            if self._screen.columns == columns and self._screen.rows == rows:
+            if g._screen.columns == columns and g._screen.rows == rows:
                 return
+            ## TODO: this must tell the grid
             self._bridge.resize(columns, rows)
 
-        if not self._screen:
+        if not g._screen:
             return
-        if event.width == self._pixel_width and \
-           event.height == self._pixel_height:
+        if event.width == g._pixel_width and \
+           event.height == g._pixel_height:
             return
-        if self._resize_timer_id is not None:
-            GLib.source_remove(self._resize_timer_id)
-        self._resize_timer_id = GLib.timeout_add(250, resize)
+        if g._resize_timer_id is not None:
+            GLib.source_remove(g._resize_timer_id)
+        g._resize_timer_id = GLib.timeout_add(250, resize)
 
     def _gtk_quit(self, *args):
         self._bridge.exit()
