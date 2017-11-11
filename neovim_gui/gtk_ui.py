@@ -133,7 +133,7 @@ class GtkUI(object):
 
     def start(self, bridge):
         """Start the UI event loop."""
-        bridge.attach(80, 24, rgb=True, ext_cmdline=False, ext_multigrid=True)#, ext_messages=True)
+        bridge.attach(80, 24, rgb=True, ext_multigrid=True)#, ext_cmdline=False)#, ext_messages=True)
         im_context = Gtk.IMMulticontext()
         im_context.set_use_preedit(False)  # TODO: preedit at cursor position
         im_context.connect('commit', self._gtk_input)
@@ -175,6 +175,7 @@ class GtkUI(object):
             self._screen.cursor_goto(row,col)
         self._drawing_area = self.g._drawing_area
         self._window= self.g._window
+        self._nvim_set_grid_focus(handle)
 
     def _nvim_set_grid_focus(self, handle):
         self.g_focus = self.grids[handle]
