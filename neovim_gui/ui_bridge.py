@@ -101,7 +101,7 @@ class UIBridge(object):
                                 print(self._ui._curgrid, end=' ', file=sys.stderr)
                                 print(repr(update), file=sys.stderr)
                         else:
-                            if self.debug_events:# and len(update[1]) > nparam:
+                            if self.debug_events and len(update[1]) > nparam:
                                 print(self._ui._curgrid, end=' ', file=sys.stderr)
                                 print(repr(update), file=sys.stderr)
                             for args in update[1:]:
