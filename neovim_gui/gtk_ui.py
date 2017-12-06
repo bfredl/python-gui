@@ -1,6 +1,7 @@
 """Neovim Gtk+ UI."""
 from __future__ import print_function, division
 import math
+import sys
 
 from functools import partial
 
@@ -79,7 +80,6 @@ class GtkUI(object):
 
     def __init__(self, font):
         """Initialize the UI instance."""
-        self._last_cursor = (1, 1)
         self._redraw_arg = None
         self._foreground = -1
         self._background = -1
@@ -94,9 +94,9 @@ class GtkUI(object):
         self._pressed = None
         self._invalid = None
         self._reset_cache()
+        self._curgrid = 0
         self.grids = {}
         self.g = None
-        self.g_focus = None
 
     def create_drawing_area(self, handle):
         self.g = Grid()
@@ -138,8 +138,7 @@ class GtkUI(object):
         im_context.set_use_preedit(False)  # TODO: preedit at cursor position
         im_context.connect('commit', self._gtk_input)
         self._im_context = im_context
-        self._nvim_set_grid(1)
-        self._nvim_set_grid_focus(1)
+        self.create_drawing_area(1)
         self._bridge = bridge
         Gtk.main()
 
@@ -153,6 +152,11 @@ class GtkUI(object):
             apply_updates()
             self._flush()
             self._start_blinking()
+            try: 
+                print("ctx", self._curgrid, self._screen.row, self._screen.col, file=sys.stderr)
+            except Exception:
+                pass
+            self._im_context.set_client_window(self.g._drawing_area.get_window())
             #self._screen_invalid()
             for g in self.grids.values():
                 g._drawing_area.queue_draw()
@@ -161,25 +165,20 @@ class GtkUI(object):
     def _screen_invalid(self):
         self.g._drawing_area.queue_draw()
 
-    def _nvim_set_grid(self, handle):
-        print("I",handle)
+    def _nvim_grid_cursor_goto(self, handle, row, col):
+        print("I",handle,file=sys.stderr)
         self._curgrid = handle
         if handle not in self.grids:
             self.create_drawing_area(handle)
         self.g = self.grids[handle]
         self._screen = self.g._screen
-        # HACK, cursor is really shared, not grid specific
         if self._screen is not None:
-            row, col = self._last_cursor
+            # TODO: this should really be asserted on the nvim side
             row, col = min(row, self._screen.rows), min(col, self._screen.columns)
             self._screen.cursor_goto(row,col)
         self._drawing_area = self.g._drawing_area
         self._window= self.g._window
-        self._nvim_set_grid_focus(handle)
 
-    def _nvim_set_grid_focus(self, handle):
-        self.g_focus = self.grids[handle]
-        self._im_context.set_client_window(self.g_focus._drawing_area.get_window())
 
     def _nvim_resize(self, columns, rows):
         print("da")
@@ -221,7 +220,6 @@ class GtkUI(object):
         self._screen.eol_clear()
 
     def _nvim_cursor_goto(self, row, col):
-        self._last_cursor = (row, col)
         self._screen.cursor_goto(row, col)
 
     def _nvim_busy_start(self):
@@ -306,7 +304,6 @@ class GtkUI(object):
         #self._redraw_glitch_fix()
         # Update internal screen
         self._screen.put(self._get_pango_text(text), self._attrs)
-        self._last_cursor = (self._screen.row, self._screen.col)
         self.g._pending[1] = min(self._screen.col - 1, self.g._pending[1])
         self.g._pending[2] = max(self._screen.col, self.g._pending[2])
 
@@ -347,14 +344,12 @@ class GtkUI(object):
         cr.set_source_surface(g._cairo_surface, 0, 0)
         cr.paint()
         cr.restore()
-        if not self._busy and self._blink and g is self.g_focus:
+        if not self._busy and self._blink and g is self.g:
             # Cursor is drawn separately in the window. This approach is
             # simpler because it doesn't taint the internal cairo surface,
             # which is used for scrolling
-            # TODO: this is a hack
-            row, col = self._last_cursor
-            row, col = min(row, g._screen.rows), min(col, g._screen.columns)
-            text, attrs = g._screen.get_cell(row, col)
+            row, col = g._screen.row, g._screen.col
+            text, attrs = g._screen.get_cursor()
             self._pango_draw(g, row, col, [(text, attrs,)], cr=cr, cursor=True)
             x, y = self._get_coords(row, col)
             currect = Rectangle(x, y, self._cell_pixel_width,
@@ -464,7 +459,7 @@ class GtkUI(object):
     def _start_blinking(self):
         def blink(*args):
             self._blink = not self._blink
-            self.g_focus._drawing_area.queue_draw()
+            self.g._drawing_area.queue_draw()
             #self._screen_invalid()
             self._blink_timer_id = GLib.timeout_add(500, blink)
         if self._blink_timer_id:
@@ -540,7 +535,7 @@ class GtkUI(object):
         if not cr:
             cr = g._cairo_context
         x, y = self._get_coords(row, col)
-        if cursor and self._insert_cursor and g is self.g_focus:
+        if cursor and self._insert_cursor and g is self.g:
             cr.rectangle(x, y, self._cell_pixel_width / 4,
                          self._cell_pixel_height)
             cr.clip()
