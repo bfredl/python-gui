@@ -87,7 +87,7 @@ class GtkUI(object):
         self._font_size = font[1]
         self._attrs = None
         self._busy = False
-        self._mouse_enabled = False
+        self._mouse_enabled = True
         self._insert_cursor = False
         self._blink = False
         self._blink_timer_id = None
@@ -115,10 +115,10 @@ class GtkUI(object):
         window.connect('delete-event', self._gtk_quit)
         window.connect('key-press-event', self._gtk_key)
         window.connect('key-release-event', self._gtk_key_release)
-        window.connect('button-press-event', self._gtk_button_press)
-        window.connect('button-release-event', self._gtk_button_release)
-        window.connect('motion-notify-event', self._gtk_motion_notify)
-        window.connect('scroll-event', self._gtk_scroll)
+        window.connect('button-press-event', partial(self._gtk_button_press, self.g))
+        window.connect('button-release-event', partial(self._gtk_button_release, self.g))
+        window.connect('motion-notify-event', partial(self._gtk_motion_notify, self.g))
+        window.connect('scroll-event', partial(self._gtk_scroll, self.g))
         window.connect('focus-in-event', self._gtk_focus_in)
         window.connect('focus-out-event', self._gtk_focus_out)
         window.show_all()
@@ -404,7 +404,7 @@ class GtkUI(object):
     def _gtk_key_release(self, widget, event, *args):
         self._im_context.filter_keypress(event)
 
-    def _gtk_button_press(self, widget, event, *args):
+    def _gtk_button_press(self, g, widget, event, *args):
         if not self._mouse_enabled or event.type != Gdk.EventType.BUTTON_PRESS:
             return
         button = 'Left'
@@ -415,24 +415,25 @@ class GtkUI(object):
         col = int(math.floor(event.x / self._cell_pixel_width))
         row = int(math.floor(event.y / self._cell_pixel_height))
         input_str = _stringify_key(button + 'Mouse', event.state)
-        input_str += '<{0},{1}>'.format(col, row)
+        input_str += '<{},{},{}>'.format(g.handle, col, row)
+        print(input_str,file=sys.stderr)
         self._bridge.input(input_str)
         self._pressed = button
         return True
 
-    def _gtk_button_release(self, widget, event, *args):
+    def _gtk_button_release(self, g, widget, event, *args):
         self._pressed = None
 
-    def _gtk_motion_notify(self, widget, event, *args):
+    def _gtk_motion_notify(self, g, widget, event, *args):
         if not self._mouse_enabled or not self._pressed:
             return
         col = int(math.floor(event.x / self._cell_pixel_width))
         row = int(math.floor(event.y / self._cell_pixel_height))
         input_str = _stringify_key(self._pressed + 'Drag', event.state)
-        input_str += '<{0},{1}>'.format(col, row)
+        input_str += '<{},{},{}>'.format(g.handle, col, row)
         self._bridge.input(input_str)
 
-    def _gtk_scroll(self, widget, event, *args):
+    def _gtk_scroll(self, g, widget, event, *args):
         if not self._mouse_enabled:
             return
         col = int(math.floor(event.x / self._cell_pixel_width))
@@ -444,7 +445,7 @@ class GtkUI(object):
         else:
             return
         input_str = _stringify_key(key, event.state)
-        input_str += '<{0},{1}>'.format(col, row)
+        input_str += '<{},{},{}>'.format(g.handle, col, row)
         self._bridge.input(input_str)
 
     def _gtk_focus_in(self, *a):
