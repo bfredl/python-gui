@@ -365,7 +365,7 @@ class GtkUI(object):
             if g._screen.columns == columns and g._screen.rows == rows:
                 return
             ## TODO: this must tell the grid
-            self._bridge.resize(columns, rows)
+            self._bridge.resize(g.handle, columns, rows)
 
         if not g._screen:
             return

@@ -41,9 +41,9 @@ class UIBridge(object):
         """Send input to nvim."""
         self._call(self._nvim.input, input_str)
 
-    def resize(self, columns, rows):
+    def resize(self, grid, columns, rows):
         """Send a resize request to nvim."""
-        self._call(self._nvim.ui_try_resize, columns, rows)
+        self._call(self._nvim.api.ui_grid_try_resize, grid, columns, rows)
 
     def attach(self, columns, rows, **options):
         """Attach the UI to nvim."""
