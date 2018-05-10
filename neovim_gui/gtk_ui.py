@@ -440,7 +440,7 @@ class GtkUI(object):
         col = int(math.floor(event.x / self._cell_pixel_width))
         row = int(math.floor(event.y / self._cell_pixel_height))
         input_str = _stringify_key(button + 'Mouse', event.state)
-        input_str += '<{},{},{}>'.format(g.handle, col, row)
+        input_str += '<{},{}>'.format(col, row)
         print(input_str,file=sys.stderr)
         self._bridge.input(input_str)
         self._pressed = button
@@ -455,7 +455,7 @@ class GtkUI(object):
         col = int(math.floor(event.x / self._cell_pixel_width))
         row = int(math.floor(event.y / self._cell_pixel_height))
         input_str = _stringify_key(self._pressed + 'Drag', event.state)
-        input_str += '<{},{},{}>'.format(g.handle, col, row)
+        input_str += '<{},{}>'.format(col, row)
         self._bridge.input(input_str)
 
     def _gtk_scroll(self, g, widget, event, *args):

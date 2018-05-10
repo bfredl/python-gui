@@ -43,7 +43,8 @@ class UIBridge(object):
 
     def resize(self, grid, columns, rows):
         """Send a resize request to nvim."""
-        self._call(self._nvim.api.ui_grid_try_resize, grid, columns, rows)
+        #self._call(self._nvim.api.ui_grid_try_resize, grid, columns, rows)
+        self._call(self._nvim.api.ui_try_resize, columns, rows)
 
     def attach(self, columns, rows, **options):
         """Attach the UI to nvim."""
@@ -101,7 +102,7 @@ class UIBridge(object):
                                 print(self._ui._curgrid, end=' ', file=sys.stderr)
                                 print(repr(update), file=sys.stderr)
                         else:
-                            if self.debug_events and len(update[1]) > nparam:
+                            if self.debug_events:# and len(update[1]) > nparam:
                                 print(self._ui._curgrid, end=' ', file=sys.stderr)
                                 print(repr(update), file=sys.stderr)
                             for args in update[1:]:
