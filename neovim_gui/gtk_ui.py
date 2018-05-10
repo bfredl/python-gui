@@ -94,6 +94,7 @@ class GtkUI(object):
         self._pressed = None
         self._invalid = None
         self._reset_cache()
+        self._attr_defs = {}
         self._curgrid = 0
         self.grids = {}
         self.g = None
@@ -139,6 +140,7 @@ class GtkUI(object):
         im_context.connect('commit', self._gtk_input)
         self._im_context = im_context
         self.create_drawing_area(1)
+        self._window = self.g._window
         self._bridge = bridge
         Gtk.main()
 
@@ -168,8 +170,6 @@ class GtkUI(object):
     def _nvim_grid_cursor_goto(self, handle, row, col):
         print("I",handle,file=sys.stderr)
         self._curgrid = handle
-        if handle not in self.grids:
-            self.create_drawing_area(handle)
         self.g = self.grids[handle]
         self._screen = self.g._screen
         if self._screen is not None:
@@ -180,9 +180,11 @@ class GtkUI(object):
         self._window= self.g._window
 
 
-    def _nvim_resize(self, columns, rows):
+    def _nvim_grid_resize(self, grid, columns, rows):
         print("da")
-        da = self.g._drawing_area
+        if grid not in self.grids:
+            self.create_drawing_area(grid)
+        da = self.grids[grid]._drawing_area
         # create FontDescription object for the selected font/size
         font_str = '{0} {1}'.format(self._font_name, self._font_size)
         self._font, pixels, normal_width, bold_width = _parse_font(font_str)
@@ -209,8 +211,9 @@ class GtkUI(object):
         self._screen = self.g._screen
         self.g._window.resize(pixel_width, pixel_height)
 
-    def _nvim_clear(self):
-        self._clear_region(self._screen.top, self._screen.bot + 1,
+    def _nvim_grid_clear(self, grid):
+        g = self.grids[grid]
+        self._clear_region(g, self._screen.top, self._screen.bot + 1,
                            self._screen.left, self._screen.right + 1)
         self._screen.clear()
 
@@ -218,9 +221,6 @@ class GtkUI(object):
         row, col = self._screen.row, self._screen.col
         self._clear_region(row, row + 1, col, self._screen.right + 1)
         self._screen.eol_clear()
-
-    def _nvim_cursor_goto(self, row, col):
-        self._screen.cursor_goto(row, col)
 
     def _nvim_busy_start(self):
         self._busy = True
@@ -237,18 +237,14 @@ class GtkUI(object):
     def _nvim_mode_change(self, mode):
         self._insert_cursor = mode == 'insert'
 
-    def _nvim_set_scroll_region(self, top, bot, left, right):
-        self._screen.set_scroll_region(top, bot, left, right)
-
-    def _nvim_scroll(self, count):
-        self._flush(self.g)
-        top, bot = self._screen.top, self._screen.bot + 1
-        left, right = self._screen.left, self._screen.right + 1
+    def _nvim_grid_scroll(self, grid, top, bot, left, right, rows, cols):
+        g = self.grids[grid]
+        self._flush(g)
         # The diagrams below illustrate what will happen, depending on the
         # scroll direction. "=" is used to represent the SR(scroll region)
         # boundaries and "-" the moved rectangles. note that dst and src share
         # a common region
-        if count > 0:
+        if rows > 0:
             # move an rectangle in the SR up, this can happen while scrolling
             # down
             # +-------------------------+
@@ -260,8 +256,8 @@ class GtkUI(object):
             # |-------------------------| dst_bot    |
             # | src (cleared)           |            |
             # +=========================+ src_bot
-            src_top, src_bot = top + count, bot
-            dst_top, dst_bot = top, bot - count
+            src_top, src_bot = top + rows , bot
+            dst_top, dst_bot = top, bot - rows 
             clr_top, clr_bot = dst_bot, src_bot
         else:
             # move a rectangle in the SR down, this can happen while scrolling
@@ -275,26 +271,29 @@ class GtkUI(object):
             # |=========================| dst_bot    |
             # | (clipped below SR)      |            v
             # +-------------------------+
-            src_top, src_bot = top, bot + count
-            dst_top, dst_bot = top - count, bot
+            src_top, src_bot = top, bot + rows 
+            dst_top, dst_bot = top - rows , bot
             clr_top, clr_bot = src_top, dst_top
-        self.g._cairo_surface.flush()
-        self.g._cairo_context.save()
+        g._cairo_surface.flush()
+        g._cairo_context.save()
         # The move is performed by setting the source surface to itself, but
         # with a coordinate transformation.
         _, y = self._get_coords(dst_top - src_top, 0)
-        self.g._cairo_context.set_source_surface(self.g._cairo_surface, 0, y)
+        g._cairo_context.set_source_surface(g._cairo_surface, 0, y)
         # Clip to ensure only dst is affected by the change
-        self._mask_region(dst_top, dst_bot, left, right)
+        self._mask_region(g, dst_top, dst_bot, left, right)
         # Do the move
-        self.g._cairo_context.paint()
-        self.g._cairo_context.restore()
+        g._cairo_context.paint()
+        g._cairo_context.restore()
         # Clear the emptied region
-        self._clear_region(clr_top, clr_bot, left, right)
-        self._screen.scroll(count)
+        self._clear_region(g, clr_top, clr_bot, left, right)
+        g._screen.scroll(rows )
 
     def _nvim_highlight_set(self, attrs):
         self._attrs = self._get_pango_attrs(attrs)
+
+    def _nvim_hl_attr_define(self, hlid, attr, info):
+        self._attr_defs[hlid] = attr
 
     def _nvim_put(self, text):
         if self._screen.row != self.g._pending[0]:
@@ -307,19 +306,45 @@ class GtkUI(object):
         self.g._pending[1] = min(self._screen.col - 1, self.g._pending[1])
         self.g._pending[2] = max(self._screen.col, self.g._pending[2])
 
+    def _nvim_grid_line(self, grid, row, col_start, cells):
+        g = self.grids[grid]
+        screen = self.grids[grid]._screen
+        # TODO: delet this
+        if row != g._pending[0] and g._pending[1] < g._pending[2]:
+            # flush pending text if jumped to a different row
+            self._flush(g)
+        g._pending[0] = row
+        # work around some redraw glitches that can happen
+        #self._redraw_glitch_fix()
+        # Update internal screen
+        col = col_start
+        attr = None # will be set in first cell
+        for cell in cells:
+            text = cell[0]
+            if len(cell) > 1:
+                hl = cell[1]
+                attr = self._get_pango_attrs(self._attr_defs.get(hl, {}))
+            repeat = cell[2] if len(cell) > 2 else 1
+            for i in range(repeat):
+                screen.put_cell(row, col, self._get_pango_text(text), attr)
+                col += 1
+
+
+        g._pending[1] = min(col_start, self.g._pending[1])
+        g._pending[2] = max(col, self.g._pending[2])
+
     def _nvim_bell(self):
         self._window.get_window().beep()
 
     def _nvim_visual_bell(self):
         pass
 
-    def _nvim_update_fg(self, fg):
-        self._foreground = fg
-        self._reset_cache()
-
-    def _nvim_update_bg(self, bg):
+    def _nvim_default_colors_set(self, fg, bg, sp, cterm_fg, cterm_bg):
+        self._foreground= fg
         self._background = bg
         self._reset_cache()
+
+
 
     def _nvim_suspend(self):
         self._window.iconify()
@@ -468,19 +493,18 @@ class GtkUI(object):
         self._blink = False
         blink()
 
-    def _clear_region(self, top, bot, left, right):
-        self._flush(self.g)
-        self.g._cairo_context.save()
-        self._mask_region(top, bot, left, right)
+    def _clear_region(self, grid, top, bot, left, right):
+        self._flush(grid)
+        grid._cairo_context.save()
+        self._mask_region(grid, top, bot, left, right)
         r, g, b = _split_color(self._background)
         r, g, b = r / 255.0, g / 255.0, b / 255.0
-        self.g._cairo_context.set_source_rgb(r, g, b)
-        self.g._cairo_context.paint()
-        self.g._cairo_context.restore()
+        grid._cairo_context.set_source_rgb(r, g, b)
+        grid._cairo_context.paint()
+        grid._cairo_context.restore()
 
-    def _mask_region(self, top, bot, left, right, cr=None):
-        if not cr:
-            cr = self.g._cairo_context
+    def _mask_region(self, grid, top, bot, left, right):
+        cr = grid._cairo_context
         x1, y1, x2, y2 = self._get_rect(top, bot, left, right)
         cr.rectangle(x1, y1, x2 - x1, y2 - y1)
         cr.clip()
@@ -499,10 +523,9 @@ class GtkUI(object):
         gs = [g] if g is not None else self.grids.values()
         for g in gs:
             row, startcol, endcol = g._pending
-            g._pending[0] = g._screen.row
-            g._pending[1] = g._screen.col
-            g._pending[2] = g._screen.col
-            if startcol == endcol:
+            g._pending[1] = 9001
+            g._pending[2] = 0
+            if startcol > endcol:
                 continue
             g._cairo_context.save()
             ccol = startcol

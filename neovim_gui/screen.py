@@ -94,6 +94,11 @@ class Screen(object):
         cell.set(text, attrs)
         self.cursor_goto(self.row, self.col + 1)
 
+    def put_cell(self, row, col, text, attrs):
+        """Put character on position."""
+        cell = self._cells[row][col]
+        cell.set(text, attrs)
+
     def get_cell(self, row, col):
         """Get text, attrs at row, col."""
         return self._cells[row][col].get()
