@@ -106,6 +106,7 @@ class GtkUI(object):
             return self.grids[handle]
         g = Grid()
         g.handle = handle
+        g.nvim_win = None
         g._pending = [0, 0, 0]
         g._screen = None
         drawing_area = Gtk.DrawingArea()
@@ -114,9 +115,7 @@ class GtkUI(object):
         g._drawing_area = drawing_area
         g._window = None
         g.options = None
-        g.font_scale = None
-        if handle == 3: #hack
-            g.font_scale = 0.7
+        g.font_size = None
         self.grids[handle] = g
         return g
 
@@ -163,6 +162,7 @@ class GtkUI(object):
             self.has_multigrid= True
         else:
             opts['ext_linegrid'] = True
+        bridge._call(bridge._nvim.command, "command! -nargs=1 FontSize call rpcnotify(1,'font_size',nvim_get_current_win(),<args>)")
         bridge.attach(80, 24, rgb=True, **opts)
         im_context = Gtk.IMMulticontext()
         im_context.set_use_preedit(False)  # TODO: preedit at cursor position
@@ -189,6 +189,16 @@ class GtkUI(object):
                 g._drawing_area.queue_draw()
         GObject.idle_add(wrapper)
 
+    def schedule_handler(self, handler):
+        GObject.idle_add(handler)
+
+    def handle_font_size(self, win, size):
+        for g in self.grids.values():
+            if g.nvim_win == win:
+                g.font_size = int(size)
+                self.win_calc_size(g)
+                break
+
     def _nvim_grid_cursor_goto(self, grid, row, col):
         g = self.get_grid(grid)
         self.g = g
@@ -203,18 +213,21 @@ class GtkUI(object):
         unrealized = g.options is None
         g.options = SimpleNamespace(y=row,x=col,anchor='NW',standalone=False,width=width,height=height)
         self.configure_win(g)
-        if g.font_scale is not None:
+        self.win_calc_size(g)
+
+        if unrealized:
+            self._resize_drawing_area(g, g._screen.columns, g._screen.rows)
+
+    def win_calc_size(self, g):
+        if g.font_size is not None:
             w = g.options.width*self._cell_pixel_width
             h = g.options.height*self._cell_pixel_height
-            font_str = '{0} {1}'.format(self._font_name, int(self._font_size*g.font_scale))
+            font_str = '{0} {1}'.format(self._font_name, g.font_size)
             _, pixels, normal_width, bold_width = _parse_font(font_str)
 
             rows, cols = int(w/pixels[0]), int(h/pixels[1])
             self._bridge.resize(g.handle, rows, cols)
 
-
-        if unrealized:
-            self._resize_drawing_area(g, g._screen.columns, g._screen.rows)
 
 
     def _nvim_float_info(self, win, handle, width, height, options):
@@ -290,9 +303,7 @@ class GtkUI(object):
     def _resize_drawing_area(self, g, columns, rows):
         da = g._drawing_area
         # create FontDescription object for the selected font/size
-        font_size = self._font_size
-        if g.font_scale is not None:
-            font_size = self._font_size*g.font_scale
+        font_size = g.font_size if g.font_size is not None else self._font_size
         font_str = '{0} {1}'.format(self._font_name, font_size)
         _font, pixels, normal_width, bold_width = _parse_font(font_str)
         # calculate the letter_spacing required to make bold have the same
@@ -317,7 +328,7 @@ class GtkUI(object):
         if g.handle == 1:
             self._cell_pixel_width = cell_pixel_width
             self._cell_pixel_height = cell_pixel_height
-        if g.font_scale is not None and 'width' in g.options.__dict__:
+        if g.font_size is not None and 'width' in g.options.__dict__:
             pixel_width = min(pixel_width, self._cell_pixel_width*g.options.width)
             pixel_height = min(pixel_height, self._cell_pixel_height*g.options.height)
 

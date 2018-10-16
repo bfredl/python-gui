@@ -88,14 +88,14 @@ class UIBridge(object):
         def on_request(method, args):
             raise Exception('Not implemented')
 
-        def on_notification(method, updates):
+        def on_notification(method, params):
             def apply_updates():
                 if self._notify:
                     sys.stdout.write('attached\n')
                     sys.stdout.flush()
                     self._notify = False
                 try:
-                    for update in updates:
+                    for update in params:
                         # import sys
                         # l = [','.join([str(a) for a in args])
                         #      for args in update[1:]]
@@ -120,6 +120,9 @@ class UIBridge(object):
                     self._call(self._nvim.quit)
             if method == 'redraw':
                 self._ui.schedule_screen_update(apply_updates)
+            elif method == 'font_size':
+                print(params)
+                self._ui.schedule_handler(lambda: self._ui.handle_font_size(*params))
 
         self._nvim.run_loop(on_request, on_notification, on_setup)
         self._ui.quit()
