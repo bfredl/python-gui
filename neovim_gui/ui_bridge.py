@@ -49,8 +49,8 @@ class UIBridge(object):
 
     def resize(self, grid, columns, rows):
         """Send a resize request to nvim."""
-        if 'ext_float' in self._nvim.metadata['ui_options']:
-            self._call(self._nvim.api.ui_grid_try_resize, grid, columns, rows)
+        if grid > 1:
+            self._call(self._nvim.api.ui_try_resize_grid, grid, columns, rows)
         else:
             self._call(self._nvim.api.ui_try_resize, columns, rows)
 

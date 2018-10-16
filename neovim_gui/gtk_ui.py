@@ -114,6 +114,9 @@ class GtkUI(object):
         g._drawing_area = drawing_area
         g._window = None
         g.options = None
+        g.font_scale = None
+        if handle == 3: #hack
+            g.font_scale = 0.7
         self.grids[handle] = g
         return g
 
@@ -154,7 +157,13 @@ class GtkUI(object):
         if 'ext_float' in bridge._nvim.metadata['ui_options']:
             opts['ext_float'] = True
             self.has_float = True
-        bridge.attach(80, 24, rgb=True, ext_multigrid=True, **opts)
+            self.has_multigrid = True
+        if 'ext_multigrid' in bridge._nvim.metadata['ui_options']:
+            opts['ext_multigrid'] = True
+            self.has_multigrid= True
+        else:
+            opts['ext_linegrid'] = True
+        bridge.attach(80, 24, rgb=True, **opts)
         im_context = Gtk.IMMulticontext()
         im_context.set_use_preedit(False)  # TODO: preedit at cursor position
         im_context.connect('commit', self._gtk_input)
@@ -187,16 +196,34 @@ class GtkUI(object):
             # TODO: this should really be asserted on the nvim side
             row, col = min(row, g._screen.rows-1), min(col, g._screen.columns-1)
             g._screen.cursor_goto(row,col)
-        self._window= self.g._window
-        self._screen = self.g._screen
+
+    def _nvim_win_position(self, win, handle, row, col, width, height):
+        g = self.get_grid(handle)
+        g.nvim_win = win
+        unrealized = g.options is None
+        g.options = SimpleNamespace(y=row,x=col,anchor='NW',standalone=False,width=width,height=height)
+        self.configure_win(g)
+        if g.font_scale is not None:
+            w = g.options.width*self._cell_pixel_width
+            h = g.options.height*self._cell_pixel_height
+            font_str = '{0} {1}'.format(self._font_name, int(self._font_size*g.font_scale))
+            _, pixels, normal_width, bold_width = _parse_font(font_str)
+
+            rows, cols = int(w/pixels[0]), int(h/pixels[1])
+            self._bridge.resize(g.handle, rows, cols)
+
+
+        if unrealized:
+            self._resize_drawing_area(g, g._screen.columns, g._screen.rows)
+
 
     def _nvim_float_info(self, win, handle, width, height, options):
         g = self.get_grid(handle)
         g.nvim_win = win
         g.options = SimpleNamespace(**options)
-        self.configure_float(g)
+        self.configure_win(g)
 
-    def _nvim_float_close(self, win, handle):
+    def _nvim_win_close(self, win, handle):
         g = self.get_grid(handle)
 
         if g._window is not None:
@@ -205,7 +232,16 @@ class GtkUI(object):
         elif g._drawing_area.get_parent() == self._layout:
             self._layout.remove(g._drawing_area)
 
-    def configure_float(self, g):
+    def _nvim_grid_destroy(self, handle):
+        g = self.get_grid(handle)
+
+        if g._window is not None:
+            g._layout.remove(g._drawing_area)
+            g._window.destroy()
+        elif g._drawing_area.get_parent() == self._layout:
+            self._layout.remove(g._drawing_area)
+
+    def configure_win(self, g):
         if g.options.standalone:
             if not g._window:
                 if g._drawing_area.get_parent() == self._layout:
@@ -223,7 +259,8 @@ class GtkUI(object):
             if g._screen is not None:
                 x = g.options.x*self._cell_pixel_width
                 y = g.options.y*self._cell_pixel_height
-                w,h = g.pixel_size
+                w = g.options.width*self._cell_pixel_width
+                h = g.options.height*self._cell_pixel_height
                 if len(g.options.anchor) >= 2:
                     if g.options.anchor[0] == 'S':
                         y -= h
@@ -233,12 +270,31 @@ class GtkUI(object):
 
 
     def _nvim_grid_resize(self, grid, columns, rows):
-        print("da")
+        print("da", grid)
         g = self.get_grid(grid)
+        if g._screen != None:
+            g._screen.resize(columns, rows)
+            repaint = True
+        else:
+            g._screen = Screen(columns, rows)
+            repaint = False
+
+        if grid == 1 or g.options is not None:
+            self._resize_drawing_area(g, columns, rows)
+            if repaint:
+                self._repaint(g)
+
+        if g.options is not None:
+            self.configure_win(g)
+
+    def _resize_drawing_area(self, g, columns, rows):
         da = g._drawing_area
         # create FontDescription object for the selected font/size
-        font_str = '{0} {1}'.format(self._font_name, self._font_size)
-        self._font, pixels, normal_width, bold_width = _parse_font(font_str)
+        font_size = self._font_size
+        if g.font_scale is not None:
+            font_size = self._font_size*g.font_scale
+        font_str = '{0} {1}'.format(self._font_name, font_size)
+        _font, pixels, normal_width, bold_width = _parse_font(font_str)
         # calculate the letter_spacing required to make bold have the same
         # width as normal
         self._bold_spacing = normal_width - bold_width
@@ -247,25 +303,30 @@ class GtkUI(object):
         pixel_width = cell_pixel_width * columns
         pixel_height = cell_pixel_height * rows
         gdkwin = da.get_window()
+        if gdkwin is None: # :(
+            gdkwin = self.get_grid(1)._drawing_area.get_window()
         content = cairo.CONTENT_COLOR
         g._cairo_surface = gdkwin.create_similar_surface(content,
-                                                            pixel_width,
-                                                            pixel_height)
+                                                         pixel_width,
+                                                         pixel_height)
         g._cairo_context = cairo.Context(g._cairo_surface)
         g._pango_layout = PangoCairo.create_layout(g._cairo_context)
         g._pango_layout.set_alignment(Pango.Alignment.LEFT)
-        g._pango_layout.set_font_description(self._font)
+        g._pango_layout.set_font_description(_font)
         g._pixel_width, g._pixel_height = pixel_width, pixel_height
-        self._cell_pixel_width = cell_pixel_width
-        self._cell_pixel_height = cell_pixel_height
-        g._screen = Screen(columns, rows)
-        g._drawing_area.set_size_request(pixel_width, pixel_height)
-        g.pixel_size = pixel_width, pixel_height
-        if g.options is not None:
-            self.configure_float(g)
+        if g.handle == 1:
+            self._cell_pixel_width = cell_pixel_width
+            self._cell_pixel_height = cell_pixel_height
+        if g.font_scale is not None and 'width' in g.options.__dict__:
+            pixel_width = min(pixel_width, self._cell_pixel_width*g.options.width)
+            pixel_height = min(pixel_height, self._cell_pixel_height*g.options.height)
 
+
+        g._drawing_area.set_size_request(pixel_width, pixel_height)
+        g.cell_pixel_width, g.cell_pixel_height = cell_pixel_width, cell_pixel_height
         if g._window is not None:
             g._window.resize(pixel_width, pixel_height)
+
 
     def _nvim_grid_clear(self, grid):
         g = self.grids[grid]
@@ -329,7 +390,7 @@ class GtkUI(object):
         g._cairo_context.save()
         # The move is performed by setting the source surface to itself, but
         # with a coordinate transformation.
-        _, y = self._get_coords(dst_top - src_top, 0)
+        _, y = self._get_coords(g, dst_top - src_top, 0)
         g._cairo_context.set_source_surface(g._cairo_surface, 0, y)
         # Clip to ensure only dst is affected by the change
         self._mask_region(g, dst_top, dst_bot, left, right)
@@ -338,6 +399,7 @@ class GtkUI(object):
         g._cairo_context.restore()
         # Clear the emptied region
         self._clear_region(g, clr_top, clr_bot, left, right)
+        g._screen.set_scroll_region(top, bot-1, left, right-1)
         g._screen.scroll(rows)
 
     def _nvim_hl_attr_define(self, hlid, attr, cterm_attr, info):
@@ -348,7 +410,6 @@ class GtkUI(object):
         # Update internal screen
 
         g = self.grids[grid]
-        screen = self.grids[grid]._screen
         # TODO: delet this
         # Update internal screen
         col = col_start
@@ -360,13 +421,18 @@ class GtkUI(object):
                 attr = self._get_pango_attrs(hl_id)
             repeat = cell[2] if len(cell) > 2 else 1
             for i in range(repeat):
-                screen.put(row, col, self._get_pango_text(text), attr)
+                g._screen.put(row, col, self._get_pango_text(text), attr)
                 col += 1
         col_end = col
 
         # work around some redraw glitches that can happen
         col_start, col_end = self._redraw_glitch_fix(g, row, col_start, col_end)
 
+        if hasattr(g, '_cairo_context'):
+            self._draw_line(g, row, col_start, col_end)
+
+    def _draw_line(self, g, row, col_start, col_end):
+        screen = g._screen
         g._cairo_context.save()
         ccol = col_start
         buf = []
@@ -385,6 +451,10 @@ class GtkUI(object):
         if buf:
             self._pango_draw(g, row, ccol, buf)
         g._cairo_context.restore()
+
+    def _repaint(self, g):
+        for i in range(g._screen.rows):
+            self._draw_line(g, i, 0, g._screen.columns)
 
 
     def _nvim_bell(self):
@@ -429,17 +499,17 @@ class GtkUI(object):
             row, col = g._screen.row, g._screen.col
             text, attrs = g._screen.get_cursor()
             self._pango_draw(g, row, col, [(text, attrs,)], cr=cr, cursor=True)
-            x, y = self._get_coords(row, col)
-            currect = Rectangle(x, y, self._cell_pixel_width,
-                                self._cell_pixel_height)
+            x, y = self._get_coords(g, row, col)
+            currect = Rectangle(x, y, g.cell_pixel_width,
+                                g.cell_pixel_height)
             self._im_context.set_cursor_location(currect)
 
     def _gtk_configure(self, g, widget, event):
         def resize(*args):
             self._resize_timer_id = None
             width, height = g._window.get_size()
-            columns = width // self._cell_pixel_width
-            rows = height // self._cell_pixel_height
+            columns = width // g.cell_pixel_width
+            rows = height // g.cell_pixel_height
             if g._screen.columns == columns and g._screen.rows == rows:
                 return
             ## TODO: this must tell the grid
@@ -493,7 +563,7 @@ class GtkUI(object):
         col = int(math.floor(event.x / self._cell_pixel_width))
         row = int(math.floor(event.y / self._cell_pixel_height))
         input_str = _stringify_key(button + 'Mouse', event.state)
-        if self.has_float:
+        if self.has_float: # TODO: also multigrid
             input_str += '<{},{},{}>'.format(g.handle, col, row)
         else:
             input_str += '<{},{}>'.format(col, row)
@@ -562,18 +632,18 @@ class GtkUI(object):
 
     def _mask_region(self, g, top, bot, left, right):
         cr = g._cairo_context
-        x1, y1, x2, y2 = self._get_rect(top, bot, left, right)
+        x1, y1, x2, y2 = self._get_rect(g, top, bot, left, right)
         cr.rectangle(x1, y1, x2 - x1, y2 - y1)
         cr.clip()
 
-    def _get_rect(self, top, bot, left, right):
-        x1, y1 = self._get_coords(top, left)
-        x2, y2 = self._get_coords(bot, right)
+    def _get_rect(self, g, top, bot, left, right):
+        x1, y1 = self._get_coords(g, top, left)
+        x2, y2 = self._get_coords(g, bot, right)
         return x1, y1, x2, y2
 
-    def _get_coords(self, row, col):
-        x = col * self._cell_pixel_width
-        y = row * self._cell_pixel_height
+    def _get_coords(self, g, row, col):
+        x = col * g.cell_pixel_width
+        y = row * g.cell_pixel_height
         return x, y
 
     def _pango_draw(self, g, row, col, data, cr=None, cursor=False):
@@ -588,7 +658,7 @@ class GtkUI(object):
         # Draw the text
         if not cr:
             cr = g._cairo_context
-        x, y = self._get_coords(row, col)
+        x, y = self._get_coords(g, row, col)
         if cursor and self._insert_cursor and g is self.g:
             cr.rectangle(x, y, self._cell_pixel_width / 4,
                          self._cell_pixel_height)

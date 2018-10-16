@@ -45,6 +45,19 @@ class Screen(object):
         self.right = columns - 1
         self._cells = [[Cell() for c in range(columns)] for r in range(rows)]
 
+    def resize(self, columns, rows):
+        shared_rows = min(rows, self.rows)
+        for r in self._cells[:shared_rows]:
+            if columns > self.columns:
+                r.extend([Cell() for c in range(columns-self.columns)])
+            else:
+                del r[columns:]
+        if rows > self.rows:
+            self._cells.extend([[Cell() for c in range(columns)] for r in range(rows-self.rows)])
+        else:
+            del self._cells[rows:]
+        self.columns, self.rows = columns, rows
+
     def clear(self):
         """Clear the screen."""
         self._clear_region(self.top, self.bot, self.left, self.right)
