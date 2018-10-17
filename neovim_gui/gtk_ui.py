@@ -160,10 +160,8 @@ class GtkUI(object):
         if 'ext_multigrid' in bridge._nvim.metadata['ui_options']:
             opts['ext_multigrid'] = True
             self.has_multigrid= True
-        else:
-            opts['ext_linegrid'] = True
         bridge._call(bridge._nvim.command, "command! -nargs=1 FontSize call rpcnotify(1,'font_size',nvim_get_current_win(),<args>)")
-        bridge.attach(80, 24, rgb=True, **opts)
+        bridge.attach(80, 24, rgb=True, ext_linegrid=True, **opts)
         im_context = Gtk.IMMulticontext()
         im_context.set_use_preedit(False)  # TODO: preedit at cursor position
         im_context.connect('commit', self._gtk_input)
@@ -230,7 +228,7 @@ class GtkUI(object):
 
 
 
-    def _nvim_float_info(self, win, handle, width, height, options):
+    def _nvim_win_float_position(self, win, handle, options):
         g = self.get_grid(handle)
         g.nvim_win = win
         g.options = SimpleNamespace(**options)
@@ -272,8 +270,8 @@ class GtkUI(object):
             if g._screen is not None:
                 x = g.options.x*self._cell_pixel_width
                 y = g.options.y*self._cell_pixel_height
-                w = g.options.width*self._cell_pixel_width
-                h = g.options.height*self._cell_pixel_height
+                w = g._screen.columns*self._cell_pixel_width # g.cell_pixel_width
+                h = g._screen.rows*self._cell_pixel_height
                 if len(g.options.anchor) >= 2:
                     if g.options.anchor[0] == 'S':
                         y -= h
