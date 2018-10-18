@@ -216,6 +216,15 @@ class GtkUI(object):
         if unrealized:
             self._resize_drawing_area(g, g._screen.columns, g._screen.rows)
 
+    def _nvim_win_hide(self, win, handle ):
+        g = self.get_grid(handle)
+        if g._window is not None:
+            g._layout.remove(g._drawing_area)
+            g._window.destroy()
+        elif g._drawing_area.get_parent() == self._layout:
+            self._layout.remove(g._drawing_area)
+
+
     def win_calc_size(self, g):
         if g.font_size is not None:
             w = g.options.width*self._cell_pixel_width
