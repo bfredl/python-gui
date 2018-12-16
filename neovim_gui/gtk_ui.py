@@ -63,7 +63,6 @@ KEY_TABLE = {
     'ISO_Left_Tab': 'Tab'
 }
 
-
 if (GLib.MAJOR_VERSION, GLib.MINOR_VERSION,) <= (2, 32,):
     GLib.threads_init()
 
@@ -123,7 +122,7 @@ class GtkUI(object):
         g = self.get_grid(handle)
         g._resize_timer_id = None
         window = Gtk.Window()
-        layout = Gtk.Fixed()
+        layout = Gtk.Layout()
         window.add(layout)
         layout.put(g._drawing_area,0,0)
         window.set_events(window.get_events() |
@@ -205,7 +204,7 @@ class GtkUI(object):
             row, col = min(row, g._screen.rows-1), min(col, g._screen.columns-1)
             g._screen.cursor_goto(row,col)
 
-    def _nvim_win_position(self, win, handle, row, col, width, height):
+    def _nvim_win_pos(self, handle, win, row, col, width, height):
         g = self.get_grid(handle)
         g.nvim_win = win
         unrealized = g.options is None
@@ -215,8 +214,9 @@ class GtkUI(object):
 
         if unrealized:
             self._resize_drawing_area(g, g._screen.columns, g._screen.rows)
+            self._repaint(g)
 
-    def _nvim_win_hide(self, win, handle ):
+    def _nvim_win_hide(self, handle):
         g = self.get_grid(handle)
         if g._window is not None:
             g._layout.remove(g._drawing_area)
@@ -237,13 +237,27 @@ class GtkUI(object):
 
 
 
-    def _nvim_win_float_position(self, win, handle, options):
+    def _nvim_win_float_pos(self, handle, win, anchor, anchor_grid, row, col, options):
         g = self.get_grid(handle)
         g.nvim_win = win
-        g.options = SimpleNamespace(**options)
+        unrealized = g.options is None
+        g.options = SimpleNamespace(x=col,y=row,anchor=anchor,standalone=False,**options)
         self.configure_win(g)
+        if unrealized:
+            self._resize_drawing_area(g, g._screen.columns, g._screen.rows)
+            self._repaint(g)
 
-    def _nvim_win_close(self, win, handle):
+    def _nvim_win_standalone_pos(self, handle, win):
+        g = self.get_grid(handle)
+        g.nvim_win = win
+        unrealized = g.options is None
+        g.options = SimpleNamespace(standalone=True)
+        self.configure_win(g)
+        if unrealized:
+            self._resize_drawing_area(g, g._screen.columns, g._screen.rows)
+            self._repaint(g)
+
+    def _nvim_win_close(self, handle):
         g = self.get_grid(handle)
 
         if g._window is not None:
@@ -324,23 +338,27 @@ class GtkUI(object):
         if gdkwin is None: # :(
             gdkwin = self.get_grid(1)._drawing_area.get_window()
         content = cairo.CONTENT_COLOR
+        if g.font_size is not None and 'width' in g.options.__dict__:
+            outer_width = self._cell_pixel_width*g.options.width
+            outer_height = self._cell_pixel_height*g.options.height
+        else:
+            outer_width, outer_height = pixel_width, pixel_height
+
+        max_width = max(pixel_width, outer_width)
+        max_height = max(pixel_height, outer_height)
         g._cairo_surface = gdkwin.create_similar_surface(content,
-                                                         pixel_width,
-                                                         pixel_height)
+                                                         max_width,
+                                                         max_height)
         g._cairo_context = cairo.Context(g._cairo_surface)
         g._pango_layout = PangoCairo.create_layout(g._cairo_context)
         g._pango_layout.set_alignment(Pango.Alignment.LEFT)
         g._pango_layout.set_font_description(_font)
-        g._pixel_width, g._pixel_height = pixel_width, pixel_height
+        g._pixel_width, g._pixel_height = max_width, max_height
         if g.handle == 1:
             self._cell_pixel_width = cell_pixel_width
             self._cell_pixel_height = cell_pixel_height
-        if g.font_size is not None and 'width' in g.options.__dict__:
-            pixel_width = min(pixel_width, self._cell_pixel_width*g.options.width)
-            pixel_height = min(pixel_height, self._cell_pixel_height*g.options.height)
 
-
-        g._drawing_area.set_size_request(pixel_width, pixel_height)
+        g._drawing_area.set_size_request(outer_width, outer_height)
         g.cell_pixel_width, g.cell_pixel_height = cell_pixel_width, cell_pixel_height
         if g._window is not None:
             g._window.resize(pixel_width, pixel_height)
@@ -348,8 +366,11 @@ class GtkUI(object):
 
     def _nvim_grid_clear(self, grid):
         g = self.grids[grid]
-        self._clear_region(g, g._screen.top, g._screen.bot + 1,
-                           g._screen.left, g._screen.right + 1)
+        g._cairo_context.save()
+        g._cairo_context.rectangle(0, 0, g._pixel_width, g._pixel_height)
+        g._cairo_context.clip()
+        self._cairo_clear(g)
+        g._cairo_context.restore()
         g._screen.clear()
 
 
@@ -471,6 +492,7 @@ class GtkUI(object):
         g._cairo_context.restore()
 
     def _repaint(self, g):
+        self._nvim_grid_clear(g.handle)
         for i in range(g._screen.rows):
             self._draw_line(g, i, 0, g._screen.columns)
 
@@ -578,8 +600,8 @@ class GtkUI(object):
             button = 'Middle'
         elif event.button == 3:
             button = 'Right'
-        col = int(math.floor(event.x / self._cell_pixel_width))
-        row = int(math.floor(event.y / self._cell_pixel_height))
+        col = int(math.floor(event.x / g.cell_pixel_width))
+        row = int(math.floor(event.y / g.cell_pixel_height))
         input_str = _stringify_key(button + 'Mouse', event.state)
         if self.has_float: # TODO: also multigrid
             input_str += '<{},{},{}>'.format(g.handle, col, row)
@@ -596,8 +618,8 @@ class GtkUI(object):
     def _gtk_motion_notify(self, g, widget, event, *args):
         if not self._mouse_enabled or not self._pressed:
             return
-        col = int(math.floor(event.x / self._cell_pixel_width))
-        row = int(math.floor(event.y / self._cell_pixel_height))
+        col = int(math.floor(event.x / g.cell_pixel_width))
+        row = int(math.floor(event.y / g.cell_pixel_height))
         input_str = _stringify_key(self._pressed + 'Drag', event.state)
         if self.has_float:
             input_str += '<{},{},{}>'.format(g.handle, col, row)
@@ -642,11 +664,14 @@ class GtkUI(object):
     def _clear_region(self, g, top, bot, left, right):
         g._cairo_context.save()
         self._mask_region(g, top, bot, left, right)
+        self._cairo_clear(g)
+        g._cairo_context.restore()
+
+    def _cairo_clear(self, g):
         red, green, blue = _split_color(self._background)
         red, green, blue = red / 255.0, green / 255.0, blue / 255.0
         g._cairo_context.set_source_rgb(red, green, blue)
         g._cairo_context.paint()
-        g._cairo_context.restore()
 
     def _mask_region(self, g, top, bot, left, right):
         cr = g._cairo_context

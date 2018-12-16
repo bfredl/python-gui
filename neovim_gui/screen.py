@@ -60,7 +60,7 @@ class Screen(object):
 
     def clear(self):
         """Clear the screen."""
-        self._clear_region(self.top, self.bot, self.left, self.right)
+        self._clear_region(0, 0, self.columns-1, self.rows-1)
 
     def eol_clear(self):
         """Clear from the cursor position to the end of the scroll region."""
